@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Village Defense – Silly Sniper Edition</title>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a1a; color: #fff; font-family: 'Roboto Condensed', sans-serif; overflow: hidden; }
+  #planning { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #2c3e50; }
+  #mapCanvas { border: 6px solid #e74c3c; background: #27ae60; cursor: crosshair; image-rendering: pixelated; }
+  .ui-row { margin: 12px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button { font-family: 'Roboto Condensed', sans-serif; font-size: 18px; font-weight: 700; padding: 12px 22px; border: 3px solid #fff; background: #e67e22; color: #fff; cursor: pointer; border-radius: 8px; letter-spacing: 1px; }
+  button:hover { background: #d35400; transform: scale(1.05); }
+  button.active { background: #c0392b; }
+  #status { font-size: 20px; margin: 8px; text-align: center; }
+  #game { display: none; position: absolute; inset: 0; }
+  
+  #hud { position: absolute; top: 12px; left: 12px; font-size: 20px; line-height: 1.4; color: #fff; text-shadow: 3px 3px 0 #000; pointer-events: none; z-index: 30; background: rgba(0,0,0,0.75); padding: 12px 16px; border-radius: 8px; border: 3px solid #f1c40f; font-weight: 700; }
+  
+  #message { position: absolute; top: 16%; left: 50%; transform: translateX(-50%); font-size: 26px; font-weight: 700; text-align: center; text-shadow: 3px 3px 0 #000; pointer-events: none; display: none; z-index: 50; background: rgba(0,0,0,0.65); padding: 8px 18px; border-radius: 8px; }
+  
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; pointer-events: none; display: none; z-index: 40; transition: all 0.15s; }
+  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 6px #000; }
+  #crosshair::before { left: 50%; top: 0; width: 3px; height: 100%; margin-left: -1.5px; }
+  #crosshair::after { top: 50%; left: 0; height: 3px; width: 100%; margin-top: -1.5px; }
+  #crosshair.charged { filter: drop-shadow(0 0 8px gold); }
+  #crosshair.charged::before, #crosshair.charged::after { background: gold; }
+  
+  #minimap { position: absolute; bottom: 15px; right: 15px; width: 220px; height: 160px; background: rgba(0,0,0,0.7); border: 3px solid #f1c40f; border-radius: 8px; z-index: 35; cursor: crosshair; }
+  #minimap canvas { width: 100%; height: 100%; display: block; }
+  #chargeBar { position: absolute; bottom: 185px; right: 15px; width: 220px; height: 12px; background: #333; border: 2px solid #fff; border-radius: 6px; z-index: 35; display: none; }
+  #chargeFill { height: 100%; width: 0%; background: gold; border-radius: 4px; transition: width 0.05s; }
+  
+  #victoryOverlay, #defeatOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 100; }
+  #victoryOverlay img, #defeatOverlay img { max-width: 80vw; max-height: 60vh; border: 8px solid #e74c3c; box-shadow: 0 0 40px rgba(231,76,60,0.6); }
+  #defeatOverlay h1, #victoryOverlay h1 { font-family: 'Black Ops One', cursive; font-size: 42px; color: #e74c3c; text-shadow: 4px 4px 0 #000; margin: 10px 0 15px; letter-spacing: 2px; }
+  #defeatOverlay p, #victoryOverlay p { font-size: 20px; margin: 12px 0 20px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="planning">
+  <h1 style="font-family:'Black Ops One',cursive; margin-bottom:12px; font-size:34px;">🎯 MISSION PLANNING</h1>
+  <div id="status">Place sniper + 3 soldiers. 8 roads. Click Start when ready.</div>
+  <canvas id="mapCanvas" width="900" height="600"></canvas>
+  <div class="ui-row">
+    <button id="btnSniper">1. PLACE SNIPER</button>
+    <button id="btnSoldier">2. PLACE SOLDIER (<span id="soldierCount">0</span>/3)</button>
+    <button id="btnStart" disabled>🚀 START MISSION</button>
+  </div>
+  <div class="ui-row"><button id="btnReset">RESET</button></div>
+</div>
+
+<div id="game">
+  <div id="hud">
+    WAVE <span id="waveNum">1</span> &nbsp;|&nbsp; EI LEFT: <span id="eiLeft">0</span><br>
+    VILLAGE: <span id="villageHP">100</span>% &nbsp;|&nbsp; CHARGES: <span id="charges">3</span><br>
+    SOLDIERS: <span id="soldiersAlive">3</span>
+  </div>
+  <div id="message"></div>
+  <div id="crosshair"></div>
+  
+  <div id="minimap"><canvas id="miniCanvas" width="220" height="160"></canvas></div>
+  <div id="chargeBar"><div id="chargeFill"></div></div>
+
+  <div id="victoryOverlay">
+    <h1>🎉 VILLAGE SECURED</h1>
+    <img id="winImg" src="win.png" onerror="this.style.display='none'">
+    <p>The sideburns have been vanquished.</p>
+    <div class="ui-row">
+      <button id="btnNextWave">NEXT WAVE →</button>
+      <button id="btnReplan">RE-PLAN</button>
+    </div>
+  </div>
+
+  <div id="defeatOverlay">
+    <h1>💀 THE SIDEBURNS HAVE WON 💀</h1>
+    <img src="EI_winsflag.jpeg" onerror="this.style.display='none'">
+    <p>The village is now a smoking pile of regret…</p>
+    <div class="ui-row">
+      <button id="btnRetry">RETRY THIS WAVE</button>
+      <button id="btnReplanDefeat">RE-PLAN MISSION</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+/* ============================================================
+   VILLAGE DEFENSE v1.0
+   + Soldier mini-map commands
+   + Charged Precision Shot (right-mouse)
+   + EI variants + Boss every 5 waves
+   ============================================================ */
+
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+const W = 900, H = 600;
+let placeMode = null, sniperPos = null, soldiers = [];
+let currentWaveSize = 5, waveNumber = 1;
+
+const paths = [
+  [{x:50,y:100},{x:200,y:180},{x:400,y:250},{x:450,y:300}],
+  [{x:850,y:80},{x:700,y:150},{x:550,y:220},{x:450,y:300}],
+  [{x:50,y:500},{x:200,y:420},{x:350,y:350},{x:450,y:300}],
+  [{x:850,y:520},{x:700,y:450},{x:550,y:380},{x:450,y:300}],
+  [{x:450,y:30},{x:450,y:120},{x:450,y:220},{x:450,y:300}],
+  [{x:450,y:570},{x:450,y:480},{x:450,y:380},{x:450,y:300}],
+  [{x:30,y:300},{x:150,y:300},{x:300,y:300},{x:450,y:300}],
+  [{x:870,y:300},{x:750,y:300},{x:600,y:300},{x:450,y:300}]
+];
+const village = {x:400,y:270,w:100,h:60};
+
+function drawMap() {
+  ctx.fillStyle = '#27ae60'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 4; ctx.setLineDash([12,8]);
+  paths.forEach(p => { ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y); for(let i=1;i<p.length;i++) ctx.lineTo(p[i].x,p[i].y); ctx.stroke(); });
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#f1c40f'; ctx.fillRect(village.x,village.y,village.w,village.h);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.strokeRect(village.x,village.y,village.w,village.h);
+  ctx.fillStyle = '#000'; ctx.font = '18px Roboto Condensed'; ctx.fillText('VILLAGE', village.x+18, village.y+35);
+  if (sniperPos) { ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(sniperPos.x,sniperPos.y,14,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.fillText('YOU',sniperPos.x-14,sniperPos.y+5); }
+  soldiers.forEach((s,i)=>{ ctx.fillStyle='#2ecc71'; ctx.beginPath(); ctx.arc(s.x,s.y,12,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#000'; ctx.fillText('S'+(i+1),s.x-8,s.y+4); });
+}
+
+document.getElementById('btnSniper').onclick = () => { placeMode='sniper'; document.querySelectorAll('button').forEach(b=>b.classList.remove('active')); document.getElementById('btnSniper').classList.add('active'); };
+document.getElementById('btnSoldier').onclick = () => { if(soldiers.length>=3)return; placeMode='soldier'; document.querySelectorAll('button').forEach(b=>b.classList.remove('active')); document.getElementById('btnSoldier').classList.add('active'); };
+document.getElementById('btnReset').onclick = () => { sniperPos=null; soldiers=[]; placeMode=null; document.getElementById('soldierCount').textContent='0'; document.getElementById('btnStart').disabled=true; drawMap(); };
+document.getElementById('btnStart').onclick = startMission;
+
+canvas.onclick = e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX-rect.left)*(W/rect.width);
+  const y = (e.clientY-rect.top)*(H/rect.height);
+  if (placeMode==='sniper') { sniperPos={x,y}; placeMode=null; document.getElementById('btnSniper').classList.remove('active'); }
+  else if (placeMode==='soldier' && soldiers.length<3) {
+    soldiers.push({x,y}); document.getElementById('soldierCount').textContent=soldiers.length;
+    if (soldiers.length===3) { placeMode=null; document.getElementById('btnSoldier').classList.remove('active'); }
+  }
+  document.getElementById('btnStart').disabled = !(sniperPos && soldiers.length===3);
+  drawMap();
+};
+drawMap();
+
+// ========== 3D GAME ==========
+let scene, camera, renderer, clock;
+let villageHP = 100, player = {yaw:0,pitch:0}, keys = {};
+let eiList = [], soldierMeshes = [], isPointerLocked = false, gameRunning = false;
+let charges = 3, isCharging = false, chargeStart = 0;
+let soldierTarget = null; // world position soldiers move toward
+
+const miniCanvas = document.getElementById('miniCanvas');
+const miniCtx = miniCanvas.getContext('2d');
+
+function createEI(type = 'regular') {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.4,0.8,4,8), new THREE.MeshLambertMaterial({color: type==='tanky' ? 0x5d3a7a : 0x8e44ad}));
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.35,8,8), new THREE.MeshLambertMaterial({color:0xf5cba7}));
+  head.position.y = 1.0; group.add(head);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.15,0.4,6), new THREE.MeshLambertMaterial({color:0xe74c3c}));
+  nose.rotation.x = Math.PI/2; nose.position.set(0,1.0,0.35); group.add(nose);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.38,8,8,0,Math.PI*2,0,Math.PI/2), new THREE.MeshLambertMaterial({color:0x2c3e50}));
+  cap.position.y = 1.15; group.add(cap);
+  const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.5,0.12), new THREE.MeshLambertMaterial({color:0x5d4037}));
+  sideL.position.set(-0.35,0.85,0.1); group.add(sideL);
+  const sideR = sideL.clone(); sideR.position.x = 0.35; group.add(sideR);
+
+  let hp = 1, speed = 1.7 + Math.random()*0.5, scale = 1;
+  if (type === 'sprinty') { speed = 2.6 + Math.random()*0.4; }
+  if (type === 'tanky')   { hp = 2; speed = 1.2; scale = 1.25; }
+  if (type === 'boss')    { hp = 8; speed = 1.1; scale = 2.1; }
+
+  group.scale.set(scale,scale,scale);
+  group.userData = { hp, maxHp: hp, path: null, pathIndex: 0, speed, type };
+  return group;
+}
+
+function createSoldier() {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35,0.9,4,8), new THREE.MeshLambertMaterial({color:0x27ae60}));
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3,8,8), new THREE.MeshLambertMaterial({color:0xf5cba7}));
+  head.position.y = 1.05; group.add(head);
+  group.userData = { hp: 3, lastKill: 0 };
+  return group;
+}
+
+function startMission() {
+  document.getElementById('planning').style.display = 'none';
+  document.getElementById('game').style.display = 'block';
+  document.getElementById('crosshair').style.display = 'block';
+  document.getElementById('chargeBar').style.display = 'block';
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb);
+  scene.fog = new THREE.Fog(0x87ceeb, 25, 90);
+
+  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+  const scale = 0.05;
+  camera.position.set((sniperPos.x-W/2)*scale, 3.5, (sniperPos.y-H/2)*scale);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:1';
+  document.getElementById('game').appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85); dir.position.set(10,20,10); scene.add(dir);
+
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(120,120), new THREE.MeshLambertMaterial({color:0x27ae60}));
+  ground.rotation.x = -Math.PI/2; scene.add(ground);
+
+  villageMesh = new THREE.Group();
+  for (let i=0;i<6;i++) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(2+Math.random()*1.5, 2+Math.random()*2.5, 2+Math.random()), new THREE.MeshLambertMaterial({color:0xf1c40f}));
+    b.position.set((Math.random()-0.5)*7, b.geometry.parameters.height/2, (Math.random()-0.5)*5);
+    villageMesh.add(b);
+  }
+  scene.add(villageMesh);
+
+  soldierMeshes = [];
+  soldiers.forEach(s => {
+    const m = createSoldier();
+    m.position.set((s.x-W/2)*scale, 1, (s.y-H/2)*scale);
+    scene.add(m); soldierMeshes.push(m);
+  });
+
+  document.addEventListener('click', () => { if (!isPointerLocked && gameRunning) renderer.domElement.requestPointerLock(); });
+  document.addEventListener('pointerlockchange', () => { isPointerLocked = !!document.pointerLockElement; });
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('keydown', e => keys[e.code]=true);
+  document.addEventListener('keyup', e => keys[e.code]=false);
+  document.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+  // Mini-map click → order soldiers
+  document.getElementById('minimap').onclick = e => {
+    const rect = miniCanvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) / rect.width;
+    const my = (e.clientY - rect.top) / rect.height;
+    // convert mini-map (0-1) to world roughly
+    const worldX = (mx - 0.5) * 80;
+    const worldZ = (my - 0.5) * 60;
+    soldierTarget = new THREE.Vector3(worldX, 1, worldZ);
+    showMessage('SOLDIERS MOVING TO MARKED POSITION', 800);
+  };
+
+  clock = new THREE.Clock();
+  gameRunning = true;
+  charges = 3;
+  document.getElementById('charges').textContent = charges;
+  spawnWave();
+  animate();
+}
+
+function spawnWave() {
+  eiList.forEach(e => scene.remove(e)); eiList = [];
+  document.getElementById('waveNum').textContent = waveNumber;
+  document.getElementById('villageHP').textContent = Math.floor(villageHP);
+  document.getElementById('soldiersAlive').textContent = soldierMeshes.filter(s=>s.userData.hp>0).length;
+
+  const scale = 0.05;
+  const isBossWave = waveNumber % 5 === 0;
+
+  for (let i = 0; i < currentWaveSize; i++) {
+    let type = 'regular';
+    const r = Math.random();
+    if (r < 0.18) type = 'sprinty';
+    else if (r < 0.30) type = 'tanky';
+
+    // Boss on every 5th wave (only one)
+    if (isBossWave && i === 0) type = 'boss';
+
+    const ei = createEI(type);
+    const path = paths[Math.floor(Math.random()*paths.length)];
+    const start = path[0];
+    const ox = (Math.random()-0.5)*6, oz = (Math.random()-0.5)*6;
+    ei.position.set((start.x-W/2)*scale + ox, 1, (start.y-H/2)*scale + oz);
+    ei.userData.path = path.map(p => new THREE.Vector3((p.x-W/2)*scale, 1, (p.y-H/2)*scale));
+    ei.userData.pathIndex = 0;
+    scene.add(ei); eiList.push(ei);
+  }
+  updateEICount();
+  const msg = isBossWave ? `WAVE ${waveNumber} – BOSS INCOMING!` : `WAVE ${waveNumber} – ${currentWaveSize} INVADERS`;
+  showMessage(msg, 900);
+}
+
+function updateEICount() {
+  const living = eiList.filter(e => e.userData.hp > 0).length;
+  document.getElementById('eiLeft').textContent = living;
+  return living;
+}
+
+function onMouseMove(e) {
+  if (!isPointerLocked) return;
+  player.yaw -= e.movementX * 0.002;
+  player.pitch -= e.movementY * 0.002;
+  player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+}
+
+function onMouseDown(e) {
+  if (!gameRunning || !isPointerLocked) return;
+  if (e.button === 2) { // right mouse = charge
+    e.preventDefault();
+    if (charges > 0) {
+      isCharging = true;
+      chargeStart = clock.getElapsedTime();
+      document.getElementById('crosshair').classList.add('charged');
+    }
+  }
+  if (e.button === 0) onShoot(isCharging && charges > 0);
+}
+
+function onMouseUp(e) {
+  if (e.button === 2) {
+    isCharging = false;
+    document.getElementById('crosshair').classList.remove('charged');
+    document.getElementById('chargeFill').style.width = '0%';
+  }
+}
+
+function onShoot(charged = false) {
+  if (!gameRunning || !isPointerLocked) return;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+  const hits = raycaster.intersectObjects(eiList, true);
+  if (hits.length > 0) {
+    let obj = hits[0].object;
+    while (obj.parent && !obj.userData.hp) obj = obj.parent;
+    if (obj.userData && obj.userData.hp > 0) {
+      const dmg = charged ? 99 : 1;
+      obj.userData.hp -= dmg;
+      if (obj.userData.hp <= 0) {
+        scene.remove(obj);
+        const t = obj.userData.type;
+        showMessage(t==='boss' ? 'BOSS DOWN!' : t==='tanky' ? 'TANK DESTROYED' : 'TARGET DOWN', 600);
+        if (charged) { charges--; document.getElementById('charges').textContent = charges; }
+        checkWaveEnd();
+      } else {
+        showMessage('HIT – STILL STANDING', 400);
+      }
+    }
+  }
+  isCharging = false;
+  document.getElementById('crosshair').classList.remove('charged');
+}
+
+function animate() {
+  if (!gameRunning) return;
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const now = clock.getElapsedTime();
+
+  // Charge visual
+  if (isCharging && charges > 0) {
+    const p = Math.min(1, (now - chargeStart) / 0.7);
+    document.getElementById('chargeFill').style.width = (p*100) + '%';
+  }
+
+  // Player move
+  const speed = 4.2;
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize();
+  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
+  if (keys['KeyW']) camera.position.addScaledVector(forward, speed*dt);
+  if (keys['KeyS']) camera.position.addScaledVector(forward, -speed*dt);
+  if (keys['KeyA']) camera.position.addScaledVector(right, -speed*dt);
+  if (keys['KeyD']) camera.position.addScaledVector(right, speed*dt);
+  camera.position.y = 3.5;
+
+  // EI
+  eiList.forEach(ei => {
+    if (ei.userData.hp <= 0) return;
+    const path = ei.userData.path;
+    if (ei.userData.pathIndex >= path.length) {
+      villageHP = Math.max(0, villageHP - (ei.userData.type==='boss' ? 12 : 6)*dt);
+      document.getElementById('villageHP').textContent = Math.floor(villageHP);
+      if (villageHP <= 0) endGame(false);
+      return;
+    }
+    const target = path[ei.userData.pathIndex];
+    const dir = target.clone().sub(ei.position);
+    if (dir.length() < 0.7) ei.userData.pathIndex++;
+    else {
+      dir.normalize();
+      ei.position.addScaledVector(dir, ei.userData.speed * dt);
+      ei.lookAt(ei.position.clone().add(dir));
+    }
+  });
+
+  // Soldiers – go to target if set, otherwise chase nearest
+  soldierMeshes.forEach(sol => {
+    if (sol.userData.hp <= 0) return;
+    let moveTo = null;
+    if (soldierTarget) moveTo = soldierTarget;
+    else {
+      let nearest = null, dist = 999;
+      eiList.forEach(ei => {
+        if (ei.userData.hp <= 0) return;
+        const d = sol.position.distanceTo(ei.position);
+        if (d < dist) { dist = d; nearest = ei; }
+      });
+      if (nearest) moveTo = nearest.position;
+    }
+    if (moveTo) {
+      const dir = moveTo.clone().sub(sol.position); dir.y = 0;
+      if (dir.length() > 2.2) {
+        dir.normalize();
+        sol.position.addScaledVector(dir, 1.6 * dt);
+        sol.lookAt(sol.position.clone().add(dir));
+      } else if (!soldierTarget && dir.length() < 2.5 && now - sol.userData.lastKill > 1.5) {
+        // only auto-kill when not under player orders
+        let nearest = null, dist = 999;
+        eiList.forEach(ei => { if (ei.userData.hp>0) { const d=sol.position.distanceTo(ei.position); if(d<dist){dist=d;nearest=ei;} } });
+        if (nearest && dist < 2.6) {
+          nearest.userData.hp = 0; scene.remove(nearest);
+          sol.userData.lastKill = now;
+          showMessage('SOLDIER: TARGET DOWN', 500);
+          checkWaveEnd();
+        }
+      }
+    }
+  });
+
+  // Mini-map
+  drawMinimap();
+
+  renderer.render(scene, camera);
+}
+
+function drawMinimap() {
+  miniCtx.fillStyle = '#1a3a1a'; miniCtx.fillRect(0,0,220,160);
+  // village
+  miniCtx.fillStyle = '#f1c40f'; miniCtx.fillRect(95,65,30,25);
+  // player
+  const px = 110 + camera.position.x * 1.3;
+  const pz = 80 + camera.position.z * 1.3;
+  miniCtx.fillStyle = '#3498db'; miniCtx.beginPath(); miniCtx.arc(px,pz,5,0,Math.PI*2); miniCtx.fill();
+  // soldiers
+  soldierMeshes.forEach(s => {
+    if (s.userData.hp <= 0) return;
+    const sx = 110 + s.position.x * 1.3;
+    const sz = 80 + s.position.z * 1.3;
+    miniCtx.fillStyle = '#2ecc71'; miniCtx.beginPath(); miniCtx.arc(sx,sz,4,0,Math.PI*2); miniCtx.fill();
+  });
+  // EI
+  eiList.forEach(e => {
+    if (e.userData.hp <= 0) return;
+    const ex = 110 + e.position.x * 1.3;
+    const ez = 80 + e.position.z * 1.3;
+    miniCtx.fillStyle = e.userData.type==='boss' ? '#ff0000' : '#9b59b6';
+    miniCtx.beginPath(); miniCtx.arc(ex,ez, e.userData.type==='boss'?6:3, 0, Math.PI*2); miniCtx.fill();
+  });
+  // target marker
+  if (soldierTarget) {
+    const tx = 110 + soldierTarget.x * 1.3;
+    const tz = 80 + soldierTarget.z * 1.3;
+    miniCtx.strokeStyle = '#fff'; miniCtx.lineWidth = 2;
+    miniCtx.beginPath(); miniCtx.arc(tx,tz,8,0,Math.PI*2); miniCtx.stroke();
+  }
+}
+
+function checkWaveEnd() {
+  if (updateEICount() === 0 && villageHP > 0) {
+    gameRunning = false; document.exitPointerLock();
+    document.getElementById('victoryOverlay').style.display = 'flex';
+    currentWaveSize += 5; waveNumber++;
+    charges = 3;
+  }
+}
+
+function endGame(won) {
+  gameRunning = false; document.exitPointerLock();
+  if (!won) document.getElementById('defeatOverlay').style.display = 'flex';
+}
+
+function showMessage(txt, ms) {
+  const el = document.getElementById('message');
+  el.textContent = txt; el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', ms);
+}
+
+document.getElementById('btnNextWave').onclick = () => {
+  document.getElementById('victoryOverlay').style.display = 'none';
+  villageHP = 100; gameRunning = true;
+  renderer.domElement.requestPointerLock(); spawnWave(); animate();
+};
+document.getElementById('btnReplan').onclick = () => location.reload();
+document.getElementById('btnRetry').onclick = () => {
+  document.getElementById('defeatOverlay').style.display = 'none';
+  villageHP = 100; gameRunning = true;
+  renderer.domElement.requestPointerLock(); spawnWave(); animate();
+};
+document.getElementById('btnReplanDefeat').onclick = () => {
+  currentWaveSize = Math.max(5, currentWaveSize - 5);
+  waveNumber = Math.max(1, waveNumber - 1);
+  location.reload();
+};
+
+// prevent context menu on right-click
+document.addEventListener('contextmenu', e => e.preventDefault());
+</script>
+</body>
+</html>
