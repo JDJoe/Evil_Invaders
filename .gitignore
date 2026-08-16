@@ -1,0 +1,11 @@
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# style experiments and local screenshots (upload your own later)
+assets/style-samples/
+SS_*.png
+screenshot*.png
