@@ -82,6 +82,7 @@
 
   const HS_KEY = 'vd_highscore';
   let highScore = Number(localStorage.getItem(HS_KEY) || 0);
+  let lastRunScore = null;
 
   /* ---------------- audio ---------------- */
   const Sfx = {
@@ -228,7 +229,7 @@
     }
     $('loadStatus').textContent = 'Ready.';
     $('btnPlay').disabled = false;
-    $('highScoreLine').textContent = 'BEST: ' + highScore;
+    updateTitleScores();
   }
 
   /* ---------------- planning ---------------- */
@@ -706,9 +707,12 @@
     charges = 3;
     mineCount = 0;
     villageHP = 100;
+    waveNumber = 1;
+    currentWaveSize = 4;
     score = 0;
     combo = 1;
     dmgBonus = 0;
+    pendingAir = 0;
     updateHUD();
     spawnWave();
     startLoop();
@@ -1644,6 +1648,35 @@
     $('shopOverlay').style.display = 'flex';
   }
 
+  function recordBest() {
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem(HS_KEY, String(highScore));
+    }
+  }
+
+  function updateTitleScores() {
+    const el = $('highScoreLine');
+    if (!el) return;
+    el.textContent = lastRunScore != null
+      ? ('LAST RUN: ' + lastRunScore + '   ·   BEST: ' + highScore)
+      : ('BEST: ' + highScore);
+  }
+
+  function finishRun() {
+    recordBest();
+    lastRunScore = score;
+    gameRunning = false;
+    waveClearPending = false;
+    try { document.exitPointerLock(); } catch (err) { /* ignore */ }
+    ['shopOverlay', 'defeatOverlay', 'waveClearHint', 'game', 'planning'].forEach((id) => {
+      const n = $(id);
+      if (n) n.style.display = 'none';
+    });
+    $('title').style.display = 'flex';
+    updateTitleScores();
+  }
+
   function nextWave() {
     $('shopOverlay').style.display = 'none';
     const before = Math.min(squadCap(), soldiers.length);
@@ -1669,6 +1702,7 @@
     gameRunning = false;
     document.exitPointerLock();
     if (!won) {
+      recordBest();
       $('defeatText').textContent = `Wave ${waveNumber}  ·  Score ${score}  ·  Best ${highScore}`;
       $('defeatOverlay').style.display = 'flex';
       Sfx.hurt();
@@ -1699,9 +1733,17 @@
   };
   $('btnStart').onclick = startMission;
   $('btnNextWave').onclick = nextWave;
-  $('btnReplan').onclick = () => location.reload();
+  $('btnFinishRun').onclick = finishRun;
   $('btnRetry').onclick = retryWave;
-  $('btnReplanDefeat').onclick = () => location.reload();
+  $('btnNewGame').onclick = finishRun;
+  if ($('btnClearBest')) {
+    $('btnClearBest').onclick = () => {
+      highScore = 0;
+      lastRunScore = null;
+      localStorage.removeItem(HS_KEY);
+      updateTitleScores();
+    };
+  }
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   loadAll();

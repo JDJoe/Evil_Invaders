@@ -36,6 +36,7 @@ Open http://localhost:8000
 | Mute | M |
 | Unlock mouse | Esc |
 | Open shop after a wave | Enter or Space |
+| Finish the run | Shop → Finish run, or defeat → New game |
 
 ### The loop
 
@@ -46,7 +47,7 @@ Open http://localhost:8000
 - Soldiers hold their posts unless you send them. They only shoot nearby targets.
 - Squad size follows the wave: **1** soldier while there are fewer than 10 invaders, **2** from 10, **3** from 16.
 - Cottages line the **outer and mid roads**, not just the square. Invaders peel off and wreck the first standing house they line up with. Smashed houses sink; they come back next wave.
-- When the wave is clear, look around and read the score. Press **Enter** for the shop. Village HP mends a little between waves.
+- When the wave is clear, look around and read the score. Press **Enter** for the shop. **Next wave** keeps this run’s score. **Finish run** banks it against **Best** and returns to the title; the next Deploy starts at **0**. Closing the tab does the same: Best is kept, the next game is a new run.
 - Shop: repairs, extra charges, medics, hotter ammo, mines, airstrikes.
 - From **10 invaders** (wave 4+), a **boss** arrives **every wave**. From **20**, you get several (one extra boss per 10 invaders, up to 4). Each slams the village and **spills 3–4 bean minions**. The wave is not over until the beans are gone too.
 - Crates drop mid-fight: village patches, extra charges, short damage buffs.
@@ -71,7 +72,7 @@ Do not shoot the villagers (baker, farmer, woman with the basket) or your own sq
 - `tools/process_assets.py` — optional chromakey / tile helper
 - `EI_winsflag.jpeg` — defeat portrait
 
-Best score is stored in the browser (`localStorage`).
+**Best** is stored in the browser (`localStorage`). The run score is not. Title shows last run and best. **Clear best record** wipes the saved best.
 
 ## Version 1.0
 
