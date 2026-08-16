@@ -24,21 +24,29 @@
   const mapToWorld = (x, y) => new THREE.Vector3((x - MAP_W / 2) * SCALE, 0, (y - MAP_H / 2) * SCALE);
 
   function housePlots() {
-    return paths.map((path, pi) => {
-      const a = path[2], b = path[3];
-      const mx = (a.x + b.x) * 0.5, my = (a.y + b.y) * 0.5;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const side = pi % 2 === 0 ? 1 : -1;
-      const off = 48;
-      return {
-        mapX: mx + (-dy / len) * side * off,
-        mapY: my + (dx / len) * side * off,
-        rot: Math.atan2(dx, dy) + side * 0.9,
-        gold: pi % 2 === 1,
-        w: 2.5, h: 2.45, d: 2.35
-      };
+    const plots = [];
+    paths.forEach((path, pi) => {
+      [0, 1, 2].forEach((i) => {
+        const a = path[i], b = path[i + 1];
+        if (!a || !b) return;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const t = 0.38 + (i % 2) * 0.18;
+        const fx = a.x + dx * t, fy = a.y + dy * t;
+        const side = ((pi + i) % 2 === 0) ? 1 : -1;
+        const off = 52 + (i === 0 ? 10 : 0);
+        plots.push({
+          mapX: fx + (-dy / len) * side * off,
+          mapY: fy + (dx / len) * side * off,
+          rot: Math.atan2(dx, dy) + side * 0.85,
+          gold: (pi + i) % 3 === 0,
+          w: 2.15 + (i % 3) * 0.22,
+          h: 2.15 + ((pi + i) % 3) * 0.22,
+          d: 2.05 + (pi % 2) * 0.18
+        });
+      });
     });
+    return plots;
   }
 
   const IMAGES = {
@@ -425,14 +433,6 @@
     randRing(10, 20, 40, 'bush', 1.8, 2.2);
     randRing(8, 18, 36, 'rock', 1.4, 1.2);
     randRing(5, 14, 22, 'hay', 1.5, 1.2);
-    housePlots().slice(0, 2).forEach((p) => {
-      const w = mapToWorld(p.mapX, p.mapY);
-      const c = spriteOf(tex.cottage, 4.4, 3.4);
-      if (!c) return;
-      const side = p.mapX < MAP_W / 2 ? -1 : 1;
-      c.position.set(w.x + side * 3.2, c.userData.baseY || 0, w.z);
-      scene.add(c);
-    });
     placeVillagers();
   }
 
@@ -473,10 +473,10 @@
     housePlots().forEach((p) => {
       const house = makeHouse(p.w, p.h, p.d, p.gold ? tex.houseGold : tex.house, tex.plaster);
       const w = mapToWorld(p.mapX, p.mapY);
-      house.position.set(w.x, 0, w.z);
+      house.position.set(w.x, 0.02, w.z);
       house.rotation.y = p.rot;
       villageGroup.add(house);
-      villageHouses.push({ mesh: house, x: w.x, z: w.z, hp: 8, maxHp: 8 });
+      villageHouses.push({ mesh: house, x: w.x, z: w.z, hp: 8, maxHp: 8, baseY: 0.02 });
     });
     // well
     const well = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 0.8, 10), mat(tex.plaster, 0xbbbbbb));
@@ -499,11 +499,26 @@
     return best;
   }
 
+  function resetHouses() {
+    villageHouses.forEach((h) => {
+      h.hp = h.maxHp;
+      h.mesh.position.y = h.baseY || 0.02;
+      h.mesh.rotation.x = 0;
+      h.mesh.rotation.z = 0;
+    });
+  }
+
   function smashHouse(h, amount) {
     if (!h || h.hp <= 0) return;
     h.hp = Math.max(0, h.hp - amount);
-    const sunk = (1 - h.hp / h.maxHp) * 1.9;
-    h.mesh.position.y = -sunk;
+    const hurt = 1 - h.hp / h.maxHp;
+    h.mesh.rotation.z = hurt * 0.18;
+    if (h.hp <= 0) {
+      h.mesh.position.y = -2.4;
+      showMessage('HOUSE DOWN', 800);
+    } else {
+      showMessage('THEY ARE WRECKING A HOUSE', 700);
+    }
   }
 
   function createUnit(type) {
@@ -803,19 +818,21 @@
     pickups = [];
     spawnQueue = [];
     spawnTimer = 0;
-    const bossWave = waveNumber % 5 === 0;
+    resetHouses();
+    const bosses = currentWaveSize < 10 ? 0 : Math.min(4, Math.floor(currentWaveSize / 10));
     const used = openPaths();
     for (let i = 0; i < currentWaveSize; i++) {
       let type = 'regular';
       const r = Math.random();
       if (waveNumber > 1 && r < 0.12) type = 'sprinty';
       else if (waveNumber > 2 && r < 0.24) type = 'tanky';
-      if (bossWave && i === 0) type = 'boss';
+      if (i < bosses) type = 'boss';
       spawnQueue.push({ type, path: used[i % used.length] });
     }
     updateHUD();
-    showMessage(bossWave ? `WAVE ${waveNumber}  ·  BOSS INCOMING` : `WAVE ${waveNumber}  ·  ${currentWaveSize} INVADERS`, 1100);
-    radio(bossWave ? 'RADIO: Big hat, bigger nose. Drop him.' : radioLine());
+    const bossMsg = bosses > 1 ? `${bosses} BOSSES INCOMING` : (bosses === 1 ? 'BOSS INCOMING' : `${currentWaveSize} INVADERS`);
+    showMessage(`WAVE ${waveNumber}  ·  ${bossMsg}`, 1100);
+    radio(bosses ? (bosses > 1 ? 'RADIO: Multiple hats. Multiple noses.' : 'RADIO: Big hat, bigger nose. Drop him.') : radioLine());
     if (pendingAir) {
       pendingAir = 0;
       setTimeout(() => {
@@ -1214,17 +1231,29 @@
       }
 
       const path = ei.userData.path;
-      const house = nearestStandingHouse(ei.position, 4.3);
-      if (house || ei.userData.pathIndex >= path.length) {
+      const house = nearestStandingHouse(ei.position, 6.8);
+      if (house) {
+        const toH = new THREE.Vector3(house.x - ei.position.x, 0, house.z - ei.position.z);
+        if (toH.length() > 1.8) {
+          toH.normalize();
+          ei.position.addScaledVector(toH, ei.userData.speed * dt);
+        }
+        ei.userData.biteT = (ei.userData.biteT || 0) - dt;
+        if (ei.userData.biteT <= 0) {
+          ei.userData.biteT = ei.userData.type === 'boss' ? 1.8 : 1.3;
+          smashHouse(house, 4);
+          hurtVillage(ei.userData.type === 'boss' ? 6 : 3);
+          shake = 0.14;
+        }
+        return;
+      }
+      if (ei.userData.pathIndex >= path.length) {
         ei.userData.biteT = (ei.userData.biteT || 0) - dt;
         if (ei.userData.biteT <= 0) {
           ei.userData.biteT = ei.userData.type === 'boss' ? 2.0 : 1.5;
-          const dmg = ei.userData.type === 'boss' ? 6 : 3;
-          if (house) smashHouse(house, 4);
-          hurtVillage(dmg);
+          hurtVillage(ei.userData.type === 'boss' ? 6 : 3);
         }
-        if (house) return;
-        if (ei.userData.pathIndex >= path.length) return;
+        return;
       }
       const target = path[ei.userData.pathIndex];
       const dir = target.clone().sub(ei.position); dir.y = 0;
