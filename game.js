@@ -17,36 +17,60 @@
     [{x:1060,y:300},{x:880,y:300},{x:790,y:300},{x:680,y:300},{x:570,y:300},{x:450,y:300}]
   ];
   const villageRect = {x:360, y:240, w:180, h:120};
-  const AIM_PX = 58;
-  const AIM_SCOPE_PX = 38;
+  // Screen-space assist only. Real hits come from the body capsule.
+  // These shrink with distance so a far speck is not a free kill.
+  const AIM_PX = 30;
+  const AIM_SCOPE_PX = 22;
+  const AIM_NEAR = 12;
+  const AIM_FAR = 38;
 
   const $ = (id) => document.getElementById(id);
   const mapToWorld = (x, y) => new THREE.Vector3((x - MAP_W / 2) * SCALE, 0, (y - MAP_H / 2) * SCALE);
 
   function housePlots() {
-    const plots = [];
-    paths.forEach((path, pi) => {
-      [0, 1, 2].forEach((i) => {
-        const a = path[i], b = path[i + 1];
-        if (!a || !b) return;
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const t = 0.38 + (i % 2) * 0.18;
-        const fx = a.x + dx * t, fy = a.y + dy * t;
-        const side = ((pi + i) % 2 === 0) ? 1 : -1;
-        const off = 52 + (i === 0 ? 10 : 0);
-        plots.push({
-          mapX: fx + (-dy / len) * side * off,
-          mapY: fy + (dx / len) * side * off,
-          rot: Math.atan2(dx, dy) + side * 0.85,
-          gold: (pi + i) % 3 === 0,
-          w: 2.15 + (i % 3) * 0.22,
-          h: 2.15 + ((pi + i) % 3) * 0.22,
-          d: 2.05 + (pi % 2) * 0.18
-        });
-      });
-    });
-    return plots;
+    const cx = 450, cy = 300;
+    const ring = [
+      { a: 0.35, r: 86 }, { a: 1.12, r: 94 }, { a: 1.95, r: 88 }, { a: 2.75, r: 96 },
+      { a: 3.55, r: 90 }, { a: 4.30, r: 98 }, { a: 5.05, r: 84 }, { a: 5.75, r: 92 }
+    ];
+    return ring.map((p, i) => ({
+      mapX: cx + Math.cos(p.a) * p.r,
+      mapY: cy + Math.sin(p.a) * p.r,
+      rot: p.a + Math.PI / 2,
+      gold: i % 3 === 0,
+      w: 2.2 + (i % 3) * 0.15,
+      h: 2.2 + ((i + 1) % 3) * 0.18,
+      d: 2.05 + (i % 2) * 0.15
+    }));
+  }
+
+  function fieldBounds() {
+    let minX = villageRect.x, maxX = villageRect.x + villageRect.w;
+    let minY = villageRect.y, maxY = villageRect.y + villageRect.h;
+    paths.forEach((p) => p.forEach((pt) => {
+      minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
+      minY = Math.min(minY, pt.y); maxY = Math.max(maxY, pt.y);
+    }));
+    const pad = 48;
+    return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+  }
+  function mapXform() {
+    const b = fieldBounds();
+    const bw = b.maxX - b.minX, bh = b.maxY - b.minY;
+    const s = Math.min(MAP_W / bw, MAP_H / bh);
+    return {
+      s,
+      ox: (MAP_W - bw * s) / 2 - b.minX * s,
+      oy: (MAP_H - bh * s) / 2 - b.minY * s
+    };
+  }
+  function toCanvas(x, y) {
+    const t = mapXform();
+    return { x: x * t.s + t.ox, y: y * t.s + t.oy };
+  }
+  function toMap(cx, cy) {
+    const t = mapXform();
+    return { x: (cx - t.ox) / t.s, y: (cy - t.oy) / t.s };
   }
 
   const IMAGES = {
@@ -60,7 +84,7 @@
     ei: 'assets/spr_ei.png',
     eiSprinty: 'assets/spr_ei_sprinty.png',
     eiTanky: 'assets/spr_ei_tanky.png',
-    eiBoss: 'assets/spr_ei_boss.png',
+    eiBoss: 'assets/spr_ei_boss.png?v=3',
     eiBean: 'assets/spr_ei_bean.png',
     soldier: 'assets/spr_soldier.png',
     tree: 'assets/spr_tree.png',
@@ -248,40 +272,48 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(120,80,40,0.95)';
-    ctx.lineWidth = 22;
+    ctx.lineWidth = 10;
     paths.forEach((p) => {
+      const a = toCanvas(p[0].x, p[0].y);
       ctx.beginPath();
-      ctx.moveTo(p[0].x, p[0].y);
-      for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+      ctx.moveTo(a.x, a.y);
+      for (let i = 1; i < p.length; i++) {
+        const b = toCanvas(p[i].x, p[i].y);
+        ctx.lineTo(b.x, b.y);
+      }
       ctx.stroke();
     });
     ctx.restore();
 
     housePlots().forEach((p) => {
+      const c = toCanvas(p.mapX, p.mapY);
       ctx.fillStyle = p.gold ? '#d4ac0d' : '#f5e6c8';
       ctx.strokeStyle = '#c0392b';
-      ctx.lineWidth = 3;
-      ctx.fillRect(p.mapX - 16, p.mapY - 14, 32, 28);
-      ctx.strokeRect(p.mapX - 16, p.mapY - 14, 32, 28);
+      ctx.lineWidth = 2;
+      ctx.fillRect(c.x - 10, c.y - 8, 20, 16);
+      ctx.strokeRect(c.x - 10, c.y - 8, 20, 16);
     });
+    const well = toCanvas(villageRect.x + villageRect.w / 2, villageRect.y + villageRect.h / 2);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 16px Roboto Condensed';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 3;
-    ctx.strokeText('WELL', villageRect.x + 28, villageRect.y + 30);
-    ctx.fillText('WELL', villageRect.x + 28, villageRect.y + 30);
+    ctx.strokeText('WELL', well.x - 22, well.y + 5);
+    ctx.fillText('WELL', well.x - 22, well.y + 5);
 
     if (sniperPos) {
+      const c = toCanvas(sniperPos.x, sniperPos.y);
       ctx.fillStyle = '#3498db';
-      ctx.beginPath(); ctx.arc(sniperPos.x, sniperPos.y, 14, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Roboto Condensed';
-      ctx.fillText('YOU', sniperPos.x - 14, sniperPos.y + 4);
+      ctx.beginPath(); ctx.arc(c.x, c.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Roboto Condensed';
+      ctx.fillText('YOU', c.x - 12, c.y + 4);
     }
     soldiers.forEach((s, i) => {
+      const c = toCanvas(s.x, s.y);
       ctx.fillStyle = '#2ecc71';
-      ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#000'; ctx.font = 'bold 12px Roboto Condensed';
-      ctx.fillText('S' + (i + 1), s.x - 8, s.y + 4);
+      ctx.beginPath(); ctx.arc(c.x, c.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#000'; ctx.font = 'bold 11px Roboto Condensed';
+      ctx.fillText('S' + (i + 1), c.x - 7, c.y + 4);
     });
   }
 
@@ -304,8 +336,10 @@
   };
   canvas.onclick = (e) => {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (MAP_W / rect.width);
-    const y = (e.clientY - rect.top) * (MAP_H / rect.height);
+    const x0 = (e.clientX - rect.left) * (MAP_W / rect.width);
+    const y0 = (e.clientY - rect.top) * (MAP_H / rect.height);
+    const mapped = toMap(x0, y0);
+    const x = mapped.x, y = mapped.y;
     if (placeMode === 'sniper') {
       sniperPos = {x, y}; placeMode = null; setActive(null);
     } else if (placeMode === 'soldier' && soldiers.length < 3) {
@@ -330,6 +364,7 @@
   let dmgBonus = 0, dmgBoostT = 0, recoil = 0, shake = 0, slowMo = 0, pendingAir = 0;
   let villageGroup = null, listenersBound = false, looping = false;
   let spawnQueue = [], spawnTimer = 0, lastVillageFlash = 0, waveClearPending = false;
+  let airTimer = 0;
 
   const TYPES = {
     regular: { hp: 1, speed: 0.92, scale: 0.70, score: 100, key: 'ei' },
@@ -539,7 +574,7 @@
       body.position.y = spec.scale;
       g.add(body);
     }
-    const rad = Math.max(0.85, w * 0.48);
+    const rad = Math.max(0.40, w * 0.34);
     const cyl = Math.max(0.35, h - rad * 1.2);
     const proxy = new THREE.Mesh(
       new THREE.CapsuleGeometry(rad, cyl, 3, 8),
@@ -635,15 +670,17 @@
     $('game').style.display = 'block';
     $('crosshair').style.display = 'block';
 
+    const nest = mapToWorld(sniperPos.x, sniperPos.y);
+    player.yaw = Math.atan2(-nest.x, -nest.z);
+    player.pitch = 0;
+
     if (!worldReady) {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x87b8e0);
-      scene.fog = new THREE.Fog(0x9ec9e8, 40, 110);
+      scene.fog = new THREE.Fog(0x9ec9e8, 58, 130);
 
       camera = new THREE.PerspectiveCamera(68, 1, 0.1, 280);
-      const nest = mapToWorld(sniperPos.x, sniperPos.y);
       camera.position.set(nest.x, 3.1, nest.z);
-      player.yaw = Math.atan2(-nest.x, -nest.z);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
@@ -693,10 +730,11 @@
       scatterBillboards();
       worldReady = true;
     } else {
-      const nest = mapToWorld(sniperPos.x, sniperPos.y);
       camera.position.set(nest.x, 3.1, nest.z);
     }
 
+    clearMines();
+    cancelAirstrike();
     deploySquad(true);
 
     bindInput();
@@ -837,9 +875,12 @@
     const bossMsg = bosses > 1 ? `${bosses} BOSSES INCOMING` : (bosses === 1 ? 'BOSS INCOMING' : `${currentWaveSize} INVADERS`);
     showMessage(`WAVE ${waveNumber}  ·  ${bossMsg}`, 1100);
     radio(bosses ? (bosses > 1 ? 'RADIO: Multiple hats. Multiple noses.' : 'RADIO: Big hat, bigger nose. Drop him.') : radioLine());
+    cancelAirstrike();
     if (pendingAir) {
       pendingAir = 0;
-      setTimeout(() => {
+      airTimer = setTimeout(() => {
+        airTimer = 0;
+        if (!gameRunning) return;
         eiList.forEach((e) => {
           if (e.userData.hp > 0) applyDamage(e, 4, false, false, e.position.clone().setY(1.4));
         });
@@ -847,6 +888,15 @@
         shake = 0.35;
       }, 1400);
     }
+  }
+
+  function cancelAirstrike() {
+    if (airTimer) { clearTimeout(airTimer); airTimer = 0; }
+  }
+
+  function clearMines() {
+    mines.forEach((m) => scene.remove(m));
+    mines = [];
   }
 
   function tickSpawn(dt) {
@@ -942,6 +992,18 @@
     return null;
   }
 
+  function rangeAimScale(obj) {
+    const d = camera.position.distanceTo(obj.position);
+    if (d <= AIM_NEAR) return 1;
+    if (d >= AIM_FAR) return 0.22;
+    return 1 - ((d - AIM_NEAR) / (AIM_FAR - AIM_NEAR)) * 0.78;
+  }
+
+  function aimSlackPx(obj, friendly) {
+    const base = isCharging ? AIM_SCOPE_PX : AIM_PX;
+    return base * (friendly ? 0.55 : 1) * rangeAimScale(obj);
+  }
+
   function screenAim(obj, maxPx) {
     const spr = obj.userData.sprite;
     const p = new THREE.Vector3();
@@ -956,9 +1018,11 @@
     const dist = Math.hypot(dx, dy);
     if (dist > maxPx) return null;
     const h = obj.userData.hitH || 2;
+    const headCut = Math.max(7, 13 * rangeAimScale(obj));
+    const head = dy < -headCut;
     const point = obj.position.clone();
-    point.y = h * (dy < -12 ? 0.8 : 0.45);
-    return { dist, head: dy < -12, point };
+    point.y = h * (head ? 0.8 : 0.45);
+    return { dist, head, point };
   }
 
   function aimTarget() {
@@ -968,13 +1032,14 @@
     ray.near = 0.05;
     ray.far = 200;
 
-    const eiSprites = [];
+    // Honest hit: the body capsule, not the padded billboard quad.
+    const proxies = [];
     eiList.forEach((ei) => {
-      if (ei.userData.hp <= 0 || !ei.userData.sprite) return;
+      if (ei.userData.hp <= 0 || !ei.userData.hitProxy) return;
       ei.updateMatrixWorld(true);
-      eiSprites.push(ei.userData.sprite);
+      proxies.push(ei.userData.hitProxy);
     });
-    const hits = eiSprites.length ? ray.intersectObjects(eiSprites, false) : [];
+    const hits = proxies.length ? ray.intersectObjects(proxies, false) : [];
     if (hits.length) {
       const unit = unitFromHit(hits[0].object);
       if (unit && unit.userData.hp > 0) {
@@ -983,29 +1048,27 @@
       }
     }
 
+    // Closest on-crosshair candidate wins — enemy or friend — so a
+    // distant EI does not steal a shot aimed at a villager, and vice versa.
     let best = null;
     let bestD = Infinity;
     eiList.forEach((ei) => {
       if (ei.userData.hp <= 0) return;
-      const hit = screenAim(ei, 160);
+      const hit = screenAim(ei, aimSlackPx(ei, false));
       if (!hit || hit.dist >= bestD) return;
       best = { ei, head: hit.head, point: hit.point };
       bestD = hit.dist;
     });
-    if (best) return best;
-
-    let friend = null;
-    let friendD = Infinity;
     const folks = [];
     soldierMeshes.forEach((s) => { if (s && s.userData.hp > 0) folks.push(s); });
     villagerMeshes.forEach((v) => { if (v) folks.push(v); });
     folks.forEach((f) => {
-      const hit = screenAim(f, 70);
-      if (!hit || hit.dist >= friendD) return;
-      friend = { friendly: true, kind: f.userData.kind, unit: f, point: hit.point };
-      friendD = hit.dist;
+      const hit = screenAim(f, aimSlackPx(f, true));
+      if (!hit || hit.dist >= bestD) return;
+      best = { friendly: true, kind: f.userData.kind, unit: f, point: hit.point };
+      bestD = hit.dist;
     });
-    return friend;
+    return best;
   }
 
   function tryShoot() {
@@ -1109,6 +1172,7 @@
     }
     maybeDrop(obj.position);
     scene.remove(obj);
+    eiList = eiList.filter((e) => e !== obj);
     updateHUD();
     checkWaveEnd();
   }
@@ -1234,8 +1298,10 @@
         ei.userData.hpFill.lookAt(camera.position);
       }
 
-      const path = ei.userData.path;
-      const house = nearestStandingHouse(ei.position, 6.8);
+      const path = ei.userData.path || [];
+      const wellDist = Math.hypot(ei.position.x, ei.position.z);
+      const atVillage = ei.userData.pathIndex >= Math.max(0, path.length - 2) || wellDist < 8.5;
+      const house = atVillage ? nearestStandingHouse(ei.position, 3.4) : null;
       if (house) {
         const toH = new THREE.Vector3(house.x - ei.position.x, 0, house.z - ei.position.z);
         if (toH.length() > 1.8) {
@@ -1249,27 +1315,25 @@
           hurtVillage(ei.userData.type === 'boss' ? 6 : 3);
           shake = 0.14;
         }
-        return;
-      }
-      if (ei.userData.pathIndex >= path.length) {
+      } else if (ei.userData.pathIndex >= path.length) {
         ei.userData.biteT = (ei.userData.biteT || 0) - dt;
         if (ei.userData.biteT <= 0) {
           ei.userData.biteT = ei.userData.type === 'boss' ? 2.0 : 1.5;
           hurtVillage(ei.userData.type === 'boss' ? 6 : 3);
         }
-        return;
-      }
-      const target = path[ei.userData.pathIndex];
-      const dir = target.clone().sub(ei.position); dir.y = 0;
-      if (dir.length() < 0.7) ei.userData.pathIndex++;
-      else {
-        dir.normalize();
-        if (ei.userData.type === 'sprinty' || ei.userData.type === 'bean') {
-          ei.userData.zig += dt * 9;
-          const side = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(Math.sin(ei.userData.zig) * 1.6);
-          dir.add(side).normalize();
+      } else {
+        const target = path[ei.userData.pathIndex];
+        const dir = target.clone().sub(ei.position); dir.y = 0;
+        if (dir.length() < 0.7) ei.userData.pathIndex++;
+        else {
+          dir.normalize();
+          if (ei.userData.type === 'sprinty' || ei.userData.type === 'bean') {
+            ei.userData.zig += dt * 9;
+            const side = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(Math.sin(ei.userData.zig) * 1.6);
+            dir.add(side).normalize();
+          }
+          ei.position.addScaledVector(dir, ei.userData.speed * dt);
         }
-        ei.position.addScaledVector(dir, ei.userData.speed * dt);
       }
       if (ei.userData.type === 'boss') {
         ei.userData.spillT -= dt;
@@ -1331,6 +1395,7 @@
         const d = sol.position.distanceTo(ei.position);
         if (d < nd) { nd = d; nearest = ei; }
       });
+      if (!moveTo && nearest) moveTo = nearest.position;
       if (moveTo) {
         const dir = moveTo.clone().sub(sol.position); dir.y = 0;
         if (dir.length() > 2.0) {
@@ -1541,7 +1606,7 @@
     g.moveTo(fx, fy);
     g.lineTo(fx - Math.sin(player.yaw) * 10, fy - Math.cos(player.yaw) * 10);
     g.stroke();
-    soldierMeshes.forEach((s) => { if (s.userData.hp > 0) plot(s, '#2ecc71', 4); });
+    soldierMeshes.forEach((s) => { if (s && s.userData.hp > 0) plot(s, '#2ecc71', 4); });
     eiList.forEach((e) => {
       if (e.userData.hp <= 0) return;
       plot(e, e.userData.type === 'boss' ? '#ff3030' : e.userData.type === 'sprinty' ? '#ff79c6' : e.userData.type === 'bean' ? '#111111' : '#9b59b6', e.userData.type === 'boss' ? 6 : 3);
@@ -1668,6 +1733,7 @@
     lastRunScore = score;
     gameRunning = false;
     waveClearPending = false;
+    cancelAirstrike();
     try { document.exitPointerLock(); } catch (err) { /* ignore */ }
     ['shopOverlay', 'defeatOverlay', 'waveClearHint', 'game', 'planning'].forEach((id) => {
       const n = $(id);
@@ -1715,6 +1781,8 @@
     charges = 3;
     combo = 1;
     waveClearPending = false;
+    clearMines();
+    cancelAirstrike();
     if ($('waveClearHint')) $('waveClearHint').style.display = 'none';
     healSoldiers();
     gameRunning = true;
